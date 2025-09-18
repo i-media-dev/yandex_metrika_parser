@@ -1,13 +1,12 @@
-import requests
-from pathlib import Path
+from datetime as dt
 import logging
-import os
+
 from dotenv import load_dotenv
 import pandas as pd
-from datetime import timedelta
-import datetime
-from parser.logging_config import setup_logging
+from pathlib import Path
+import requests
 
+from parser.logging_config import setup_logging
 from parser.constants import (
     CAMPAIGN_CATEGORIES,
     CLIENT_LOGINS,
@@ -16,45 +15,35 @@ from parser.constants import (
     PLATFORM_TYPES,
     REPORT_FIELDS,
     REPORT_NAME,
-    YAD_REPORTS_URL,
-    METRICA_ID
+    YANDEX_METRICA_URL,
+    METRICA_ID,
+    METRICA_LIMIT
 )
 
 setup_logging()
-
-pd.set_option('display.width', 1500)
-pd.set_option('display.max_columns', None)
-pd.set_option('display.max_colwidth', None)
-# pd.set_option('display.max_rows', None)
-
 load_dotenv()
 
-# token = str(os.getenv('YANDEX_METRIKA_TOKEN'))
-# counter_id = METRIKA_ID
-# start_date = '2025-09-01'
-# end_date = '2025-09-02'
 
 class MetricaSave:
     """Класс для получения и сохранения данных отчетов из Яндекс.Метрики."""
-    token = str(os.getenv('YANDEX_METRIKA_TOKEN'))
-    counter_id = '155462'
-    start_date = 1
-    end_date = 1
 
     def __init__(
         self,
         token: str,
         dates_list: list,
-        container_id: str = METRICA_ID,
+        counter_id: str = METRICA_ID,
         login: list = CLIENT_LOGINS,
-        folder_name: str = DEFAULT_FOLDER
+        folder_name: str = DEFAULT_FOLDER,
+        limit: int = METRICA_LIMIT
     ):
         if not token:
             logging.error('Токен отсутствует или не действителен')
         self.token = token
         self.logins = login
         self.dates_list = dates_list
+        self.counter_id = counter_id
         self.folder = folder_name
+        self.limit = limit
 
     def _get_file_path(self, filename: str) -> Path:
         """Защищенный метод. Создает путь к файлу в указанной папке."""
@@ -66,65 +55,131 @@ class MetricaSave:
             logging.error(f'Ошибка: {e}')
             raise
 
-    def get_yandex_metrika_data(self, oauth_token, counter_id, start_date, end_date):
+    def _get_all_metrika_data(self):
         """Получаем данные из Метрики."""
-
-        url = "https://api-metrika.yandex.net/stat/v1/data"
-
+        start_date = self.dates_list[0]
+        end_date = self.dates_list[-1]
+        url = YANDEX_METRICA_URL
         headers = {
-            "Authorization": f"OAuth {oauth_token}"
+            "Authorization": f"OAuth {self.token}"
         }
-
         params = {
-            "ids": counter_id,
+            "ids": self.counter_id,
             "metrics": "ym:s:ecommercePurchases,ym:s:ecommerceRevenue",
             "dimensions": "ym:s:date,ym:s:lastsignDirectClickOrder, ym:s:DeviceCategory",
             "date1": start_date,
             "date2": end_date,
             "accuracy": "full",
-            "limit": 10000  # убрать в константы
+            "limit": self.limit
         }
+        try:
+            response = requests.get(url, headers=headers, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                data = data['data']
 
-        response = requests.get(url, headers=headers, params=params)
-        if response.status_code == 200:
-            data = response.json()
-            data = data['data']
+                result = []
+                for i in data:
+                    if '-' in str(i['dimensions'][1]['name']):
+                        result.append(
+                            [
+                                i['dimensions'][0]['name'],
+                                i['dimensions'][1]['name'].split('|')[0],
+                                i['dimensions'][2]['name'],
+                                int(i['metrics'][0]),
+                                int(float(i['metrics'][1]))
+                            ]
+                        )
+                columns = [
+                    'Date',
+                    'CampaignName',
+                    'Device',
+                    'transactions',
+                    'revenue'
+                ]
+                df = pd.DataFrame(result, columns=columns)
+                df['sn'] = df.apply(self.add_ps, axis=1)
+                df['type'] = df.apply(self.add_type, axis=1)
+                df['apptype'] = df.apply(self.add_apptype, axis=1)
+                df['geo'] = df.apply(self.geo, axis=1)
+                df['Device'] = df['Device'].str.lower()
+                df['Device'] = df['Device'].str.replace(
+                    'smartphones', 'mobile')
+                df['Device'] = df['Device'].str.replace('tablets', 'tablet')
+                df['Device'] = df['Device'].str.replace('pc', 'desktop')
+                df['Devices'] = df.apply(self.desmob, axis=1)
+                del df['Device']
+                df.rename(columns={'Devices': 'Device'}, inplace=True)
+                return df
+        except Exception as e:
+            logging.error(f'Ошибка: {e}')
 
-            result = []
-            for i in data:
-                if '-' in str(i['dimensions'][1]['name']):
-                    result.append(
-                        [
-                            i['dimensions'][0]['name'],
-                            i['dimensions'][1]['name'].split('|')[0],
-                            i['dimensions'][2]['name'],
-                            int(i['metrics'][0]),
-                            int(float(i['metrics'][1]))
-                        ]
-                    )
-            return result
+    def _get_filtered_cache_data(self, filename_data: str) -> pd.DataFrame:
+        """Метод получает отфильтрованные данные из кэш-файла."""
+        temp_cache_path = self._get_file_path(filename_data)
+        try:
+            old_df = pd.read_csv(
+                temp_cache_path,
+                sep=';',
+                encoding='cp1251',
+                header=0
+            )
+            for dates in self.dates_list:
+                old_df = old_df[~old_df['Date'].fillna('').str.contains(
+                    fr'{dates}', case=False, na=False
+                )]
+            return old_df
+        except FileNotFoundError:
+            logging.warning('Файл кэша не найден. Первый запуск.')
+            return pd.DataFrame()
+        except pd.errors.EmptyDataError:
+            logging.warning('Файл кэша пустой.')
+            return pd.DataFrame()
+        except Exception as e:
+            logging.error(f'Ошибка: {e}')
+            raise
 
-    def main(self):
-        data = self.get_yandex_metrika_data(
-            start_date,
-            end_date
-        )
+    def save_data(
+        self,
+        filename_temp: str,
+        filename_data: str
+    ) -> None:
+        """Метод сохраняет новые данные, объединяя с существующими."""
+        df_new = self._get_all_metrika_data()
+        df_old = self._get_filtered_cache_data(filename_data)
+        try:
+            temp_cache_path = self._get_file_path(filename_data)
+            if df_new.empty:
+                logging.warning('Нет новых данных для сохранения')
+                return
+            if not isinstance(df_old, pd.DataFrame) or df_old.empty:
+                df_new.to_csv(
+                    temp_cache_path,
+                    index=False,
+                    header=True,
+                    sep=';',
+                    encoding='cp1251'
+                )
+                logging.info(
+                    'Новые данные сохранены. Исторические данные отсутствовали'
+                )
+                return
+            for dates in self.dates_list:
+                df_old = df_old[~df_old['Date'].fillna('').str.contains(
+                    fr'{dates}', case=False, na=False
+                )]
 
-        columns = ['Date', 'CampaignName', 'Device', 'transactions', 'revenue']
-        df = pd.DataFrame(data, columns=columns)  # Сильно урезанный df из старого файла
-        df['sn'] = df.apply(self.add_ps, axis=1)
-        df['type'] = df.apply(self.add_type, axis=1)
-        df['apptype'] = df.apply(self.add_apptype, axis=1)
-        df['geo'] = df.apply(self.geo, axis=1)
-        df['Device'] = df['Device'].str.lower()
-        df['Device'] = df['Device'].str.replace('smartphones', 'mobile')
-        df['Device'] = df['Device'].str.replace('tablets', 'tablet')
-        df['Device'] = df['Device'].str.replace('pc', 'desktop')
-        df['Devices'] = df.apply(self.desmob, axis=1)
-        del df['Device']
-        df.rename(columns={'Devices': 'Device'}, inplace=True)
-
-        return df
+            df_old = pd.concat([df_new, df_old])
+            df_old.to_csv(
+                temp_cache_path,
+                index=False,
+                header=True,
+                sep=';',
+                encoding='cp1251'
+            )
+            logging.info('Данные успешно обновлены')
+        except Exception as e:
+            logging.error(f'Ошибка во время обновления: {e}')
 
     def desmob(self, row):
         if row['apptype'] != 'web':
@@ -137,8 +192,6 @@ class MetricaSave:
         return geo
 
     def add_type(self, row):
-        # if 'ios' in row['CampaignName'] or 'android' in row['CampaignName']:
-        #     return 'rmp'
         if 'cpm' in row['CampaignName']:
             return 'brandformance'
         elif '-brand' in row['CampaignName']:
@@ -163,6 +216,3 @@ class MetricaSave:
             return 'android'
         else:
             return 'web'
-
-test = MetricaSave(,
-print(test.main())

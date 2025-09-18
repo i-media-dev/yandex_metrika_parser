@@ -1,8 +1,11 @@
-YAD_REPORTS_URL = 'https://api.direct.yandex.com/json/v5/reports'
+YANDEX_METRICA_URL = 'https://api-metrika.yandex.net/stat/v1/data'
 """URL api для запроса отчета."""
 
 REPORT_NAME = 'all_reports1'
 """Имя отчета по умолчанию."""
+
+METRICA_LIMIT = 10000
+"""Лимит выдачи данных (10000)"""
 
 DEFAULT_FOLDER = 'data'
 """Папка для сохранения .csv файлов по умолчанию."""
@@ -139,3 +142,8 @@ CLIENT_LOGINS = [
 
 ]
 """Список логинов."""
+
+EAPTEKA_CLIENT_LOGINS = [
+    'imedia-eapteka'
+]
+"""Список логинов Еаптека."""
