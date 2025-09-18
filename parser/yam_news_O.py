@@ -1,11 +1,26 @@
 import requests
+from pathlib import Path
+import logging
 import os
 from dotenv import load_dotenv
-# from all_scripts.decorators import time_decorator
-# from all_scripts.my_func import new_paths
 import pandas as pd
 from datetime import timedelta
 import datetime
+from parser.logging_config import setup_logging
+
+from parser.constants import (
+    CAMPAIGN_CATEGORIES,
+    CLIENT_LOGINS,
+    DEFAULT_FOLDER,
+    DEFAULT_RETURNES,
+    PLATFORM_TYPES,
+    REPORT_FIELDS,
+    REPORT_NAME,
+    YAD_REPORTS_URL,
+    METRICA_ID
+)
+
+setup_logging()
 
 pd.set_option('display.width', 1500)
 pd.set_option('display.max_columns', None)
@@ -14,17 +29,42 @@ pd.set_option('display.max_colwidth', None)
 
 load_dotenv()
 
-oauth_token = str(os.getenv('YANDEX_METRIKA_TOKEN'))
-counter_id = '155462'
-start_date = '2025-09-01'
-end_date = '2025-09-02'
+# token = str(os.getenv('YANDEX_METRIKA_TOKEN'))
+# counter_id = METRIKA_ID
+# start_date = '2025-09-01'
+# end_date = '2025-09-02'
 
 class MetricaSave:
     """Класс для получения и сохранения данных отчетов из Яндекс.Метрики."""
-    # oauth_token = str(os.getenv('YANDEX_METRIKA_TOKEN'))
-    # counter_id = '155462'
-    # start_date = 1
-    # end_date = 1
+    token = str(os.getenv('YANDEX_METRIKA_TOKEN'))
+    counter_id = '155462'
+    start_date = 1
+    end_date = 1
+
+    def __init__(
+        self,
+        token: str,
+        dates_list: list,
+        container_id: str = METRICA_ID,
+        login: list = CLIENT_LOGINS,
+        folder_name: str = DEFAULT_FOLDER
+    ):
+        if not token:
+            logging.error('Токен отсутствует или не действителен')
+        self.token = token
+        self.logins = login
+        self.dates_list = dates_list
+        self.folder = folder_name
+
+    def _get_file_path(self, filename: str) -> Path:
+        """Защищенный метод. Создает путь к файлу в указанной папке."""
+        try:
+            file_path = Path(__file__).parent.parent / self.folder
+            file_path.mkdir(parents=True, exist_ok=True)
+            return file_path / filename
+        except Exception as e:
+            logging.error(f'Ошибка: {e}')
+            raise
 
     def get_yandex_metrika_data(self, oauth_token, counter_id, start_date, end_date):
         """Получаем данные из Метрики."""
@@ -53,19 +93,22 @@ class MetricaSave:
             result = []
             for i in data:
                 if '-' in str(i['dimensions'][1]['name']):
-                    result.append([i['dimensions'][0]['name'],
-                                   i['dimensions'][1]['name'].split('|')[0],
-                                   i['dimensions'][2]['name'],
-                                   int(i['metrics'][0]),
-                                   int(float(i['metrics'][1]))])
-
+                    result.append(
+                        [
+                            i['dimensions'][0]['name'],
+                            i['dimensions'][1]['name'].split('|')[0],
+                            i['dimensions'][2]['name'],
+                            int(i['metrics'][0]),
+                            int(float(i['metrics'][1]))
+                        ]
+                    )
             return result
 
     def main(self):
-        data = self.get_yandex_metrika_data(oauth_token,
-                                       counter_id,
-                                       start_date,
-                                       end_date)
+        data = self.get_yandex_metrika_data(
+            start_date,
+            end_date
+        )
 
         columns = ['Date', 'CampaignName', 'Device', 'transactions', 'revenue']
         df = pd.DataFrame(data, columns=columns)  # Сильно урезанный df из старого файла
@@ -88,11 +131,11 @@ class MetricaSave:
             return 'mobile'
         else:
             return row['Device']
+
     def geo(self, row):
         geo = row['CampaignName'].split('-')[0]
         return geo
 
-        # print(df.head())
     def add_type(self, row):
         # if 'ios' in row['CampaignName'] or 'android' in row['CampaignName']:
         #     return 'rmp'
@@ -102,6 +145,7 @@ class MetricaSave:
             return 'brand'
         else:
             return 'nonbrand'
+
     def add_ps(self, row):
         if 'srch' in row['CampaignName'] or '-srch-' in row['CampaignName']:
             return 'поиск'
@@ -111,6 +155,7 @@ class MetricaSave:
             return 'сеть'
         else:
             return 'nd'
+
     def add_apptype(self, row):
         if 'ios' in row['CampaignName']:
             return 'ios'
@@ -119,5 +164,5 @@ class MetricaSave:
         else:
             return 'web'
 
-test = MetricaSave()
+test = MetricaSave(,
 print(test.main())

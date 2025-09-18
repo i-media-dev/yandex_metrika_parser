@@ -46,6 +46,8 @@ DEFAULT_RETURNES = {
     'error': 'unknown'
 }
 
+METRICA_ID = '155462'
+
 CLIENT_LOGINS = [
     'citilink-nvsb', 'imedia-citilinkweb',
     'imedia-citilink2', 'imedia-citilink-blg',
