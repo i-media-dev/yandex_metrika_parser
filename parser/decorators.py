@@ -2,6 +2,7 @@ import functools
 import logging
 import time
 from datetime import datetime as dt
+
 from parser.logging_config import setup_logging
 
 

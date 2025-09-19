@@ -55,7 +55,7 @@ class MetricaSave:
             logging.error(f'Ошибка: {e}')
             raise
 
-    def _get_all_metrika_data(self):
+    def _get_all_metrika_data(self) -> pd.DataFrame:
         """Получаем данные из Метрики."""
         start_date = self.dates_list[0]
         end_date = self.dates_list[-1]
@@ -74,11 +74,16 @@ class MetricaSave:
         }
         try:
             response = requests.get(url, headers=headers, params=params)
-            if response.status_code == 200:
+            if response.status_code == requests.codes.ok:
                 data = response.json()
-                data = data['data']
 
+                if not data or 'data' not in data or not data['data']:
+                    logging.warning('Нет данных для кампании ')
+                    return pd.DataFrame()
+
+                data = data['data']
                 result = []
+
                 for i in data:
                     if '-' in str(i['dimensions'][1]['name']):
                         result.append(
@@ -101,7 +106,7 @@ class MetricaSave:
                 df['sn'] = df.apply(self.add_ps, axis=1)
                 df['type'] = df.apply(self.add_type, axis=1)
                 df['apptype'] = df.apply(self.add_apptype, axis=1)
-                df['geo'] = df.apply(self.geo, axis=1)
+                df['geo'] = df.apply(self._get_geo, axis=1)
                 df['Device'] = df['Device'].str.lower()
                 df['Device'] = df['Device'].str.replace(
                     'smartphones', 'mobile')
@@ -113,6 +118,7 @@ class MetricaSave:
                 return df
         except Exception as e:
             logging.error(f'Ошибка: {e}')
+            raise
 
     def _get_filtered_cache_data(self, filename_data: str) -> pd.DataFrame:
         """Метод получает отфильтрованные данные из кэш-файла."""
@@ -139,11 +145,7 @@ class MetricaSave:
             logging.error(f'Ошибка: {e}')
             raise
 
-    def save_data(
-        self,
-        filename_temp: str,
-        filename_data: str
-    ) -> None:
+    def save_data(self, filename_data: str) -> None:
         """Метод сохраняет новые данные, объединяя с существующими."""
         df_new = self._get_all_metrika_data()
         df_old = self._get_filtered_cache_data(filename_data)
@@ -181,15 +183,45 @@ class MetricaSave:
         except Exception as e:
             logging.error(f'Ошибка во время обновления: {e}')
 
+    # def _get_campaign_category(self, row) -> str:
+    #     try:
+    #         for tag, value in CAMPAIGN_CATEGORIES.items():
+    #             if tag in row['CampaignName']:
+    #                 return value
+    #         return DEFAULT_RETURNES.get('campaign', '')
+    #     except (AttributeError, IndexError, KeyError):
+    #         return DEFAULT_RETURNES.get('error', '')
+
+    # def _get_platform_type(self, row) -> str:
+    #     try:
+    #         for tag, value in PLATFORM_TYPES.items():
+    #             if tag in row['CampaignName']:
+    #                 return value
+    #         return DEFAULT_RETURNES.get('platform', '')
+    #     except (AttributeError, IndexError, KeyError):
+    #         return DEFAULT_RETURNES.get('error', '')
+
+    # def _get_app_type(self, row) -> str:
+    #     try:
+    #         for tag, value in APP_TYPES.items():
+    #             if tag in row['CampaignName']:
+    #                 return value
+    #         return DEFAULT_RETURNES.get('app', '')
+    #     except (AttributeError, IndexError, KeyError):
+    #         return DEFAULT_RETURNES.get('error', '')
+
+    def _get_geo(self, row):
+        try:
+            geo = row['CampaignName'].split('-')[0]
+            return geo
+        except (AttributeError, IndexError, KeyError):
+            return DEFAULT_RETURNES.get('error', '')
+
     def desmob(self, row):
         if row['apptype'] != 'web':
             return 'mobile'
         else:
             return row['Device']
-
-    def geo(self, row):
-        geo = row['CampaignName'].split('-')[0]
-        return geo
 
     def add_type(self, row):
         if 'cpm' in row['CampaignName']:

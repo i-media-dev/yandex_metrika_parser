@@ -1,6 +1,9 @@
 YANDEX_METRICA_URL = 'https://api-metrika.yandex.net/stat/v1/data'
 """URL api для запроса отчета."""
 
+DATE_FORMAT = '%Y-%m-%d'
+"""Формат дат по умолчанию ('%Y-%m-%d')."""
+
 REPORT_NAME = 'all_reports1'
 """Имя отчета по умолчанию."""
 
